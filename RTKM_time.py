@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from typing import Optional
 from proxlib.operators import proj_csimplex
 
+
 def SimplexProx(z: np.ndarray, a: float) -> np.ndarray:
     """
     Project onto simplex.
@@ -17,27 +18,26 @@ def SimplexProx(z: np.ndarray, a: float) -> np.ndarray:
     u = z.copy()
 
     if u.ndim == 1:
-        u = u[np.newaxis,:]
+        u = u[np.newaxis, :]
 
     u[:, ::-1].sort(axis=1)
 
     j = np.arange(u.shape[1])
-    v = (a - np.cumsum(u, axis=1))/(j + 1)
+    v = (a - np.cumsum(u, axis=1)) / (j + 1)
 
     i = np.repeat(j[None, :], u.shape[0], axis=0)
-    rho = np.max(i*(u + v > 0), axis=1)
+    rho = np.max(i * (u + v > 0), axis=1)
     lam = v[np.arange(u.shape[0]), rho][:, None]
     return np.maximum(z + lam, 0.0)
 
 
-
 class RTKM:
     """Create a class to perform Robust Trimmed k Means clustering."""
-    
+
     def __init__(self, data: np.ndarray) -> None:
         """
         Initialize RTKM.
-        
+
         Args:
             data (np.ndarray): Array containing data points. Array should be of size mxN, where m is the number of
             dimensions and N is the number of data points.
@@ -56,7 +56,7 @@ class RTKM:
         self.obj_hist = None
         self.err_hist = None
 
-    def perform_clustering(self, k: int, percent_outliers: float, tol: float = 1e-6, max_iter: int = 100,
+    def perform_clustering(self, k: int, tol: float = 1e-6, max_iter: int = 100,
                            init_centers: Optional[np.ndarray] = None, num_members: int = 1.0) -> None:
         """
         Perform Robust Trimmed k Means algorithm and set values for RTKM attributes.
@@ -73,10 +73,9 @@ class RTKM:
             num_members (int): Maximum number of clusters a point can belong to.
         """
         n = self.data.shape[1]
-        h = n - int(percent_outliers * n)
 
         if init_centers is None:
-            centers = self.data[:, np.random.choice(n, k)]
+            centers = self.data[:, np.random.choice(n, k), :]
         else:
             centers = init_centers
 
@@ -97,19 +96,20 @@ class RTKM:
         outliers = np.ones(n)
 
         while err >= tol:
-            prod1 = (outliers * weights).T
-            centers_new = (self.data @ prod1 + centers_old / lam) / (np.sum(prod1, axis=0) + 1 / lam)
+            prod1 = (weights).T
+            #@ for each time slice...
+            centers_new = (self.data @ prod1) + centers_old / (np.sum(prod1, axis=0) + n)
 
             data_norm = np.linalg.norm(self.data, 2, axis=0) ** 2
             centers_norm = np.linalg.norm(centers_new, 2, axis=0) ** 2
 
             if num_members == 1:
                 weights_new = SimplexProx(weights.T - 1 / dk * outliers[:, np.newaxis] * (
-                            data_norm[:, np.newaxis] - 2 * self.data.T @ centers_new + centers_norm[np.newaxis, :]),
+                        data_norm[:, np.newaxis] - 2 * self.data.T @ centers_new + centers_norm[np.newaxis, :]),
                                           num_members)
             else:
                 weights_new = weights.T - 1 / dk * outliers[:, np.newaxis] * (
-                            data_norm[:, np.newaxis] - 2 * self.data.T @ centers_new + centers_norm[np.newaxis, :])
+                        data_norm[:, np.newaxis] - 2 * self.data.T @ centers_new + centers_norm[np.newaxis, :])
                 proj_csimplex(weights_new, num_members, 0.0, 1.0)
 
             weights_new = weights_new.T
@@ -128,9 +128,7 @@ class RTKM:
 
             err = weights_err * dk + outliers_err * ek + centers_err
 
-            sum_term1 = np.sum(outliers * np.linalg.norm(self.data - centers @ weights, 2, axis=0) ** 2)
-            sum_term2 = 1 / lam * np.sum(np.linalg.norm(centers - centers_old, 2, axis=0) ** 2)
-            obj = sum_term1 + sum_term2
+            obj = np.sum(outliers * np.linalg.norm(self.data - centers @ weights, 2, axis=0) ** 2)
 
             obj_hist.append(obj)
             err_hist.append(err)
@@ -158,18 +156,9 @@ class RTKM:
     def return_clusters(self):
         """Returns predicted cluster labels and outliers from RTKM.  Only used for single-cluster membership."""
         pred_clusters = np.argmax(self.weights, axis=0)
-                
-        pred_outliers = np.where(self.outliers == 0)[0]
-    
-        pred_clusters[pred_outliers] = self.weights.shape[0]
-    
-        return pred_clusters, pred_outliers 
 
-    def performance_report(self):
-        """Generates plots of objective function and the optimality condition over iterations of RTKM."""
-        fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-        ax[0].plot(self.obj_hist)
-        ax[0].set_title('function value')
-        ax[1].semilogy(self.err_hist)
-        ax[1].set_title('optimality condition')
-        fig.suptitle('RTKM Performance Report')
+        pred_outliers = np.where(self.outliers == 0)[0]
+
+        pred_clusters[pred_outliers] = self.weights.shape[0]
+
+        return pred_clusters, pred_outliers
